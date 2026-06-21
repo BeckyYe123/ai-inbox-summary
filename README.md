@@ -86,6 +86,51 @@ src/
 
 ---
 
+## Architecture
+
+Gmail / Mail Provider
+↓
+Nylas OAuth + Webhooks
+↓
+Express TypeScript Backend
+↓
+SQLite Storage
+↓
+AI Summarizer
+↓
+Scheduler
+↓
+Nylas Email Send API
+
+## Webhook Design
+
+The app exposes `/webhooks/nylas` for Nylas webhook events.
+
+It supports:
+- Nylas challenge verification
+- `x-nylas-signature` HMAC validation
+- fast 200 OK acknowledgment
+- asynchronous processing with `setImmediate`
+- duplicate prevention using `message_id`
+- truncated payload handling by refetching the full message from Nylas
+
+## Scheduling Strategy
+
+The app uses a database-backed polling scheduler.
+
+Each connected user stores:
+- `grant_id`
+- `destination_email`
+- `cadence`
+- `last_summary_at`
+
+Supported cadences:
+- hourly
+- every 6 hours
+- daily
+
+The scheduler checks users every minute and only sends a summary when the stored cadence window has elapsed. The `summary_runs` table prevents duplicate summary windows across restarts.
+
 ## Setup
 
 Install dependencies:
