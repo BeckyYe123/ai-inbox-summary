@@ -135,6 +135,9 @@ h1 {
     <a class="button" href="/sync/${grantId}">Sync Inbox</a>
     <a class="button" href="/summary/${grantId}">Generate Summary</a>
     <a class="button" href="/priority/${grantId}">Smart Priority Inbox</a>
+    <a class="button" href="/settings/${grantId}">
+  Summary Settings
+</a>
     <a class="button secondary" href="/send-summary/${grantId}?to=dongyanye7@gmail.com">Email Summary</a>
   </div>
 </body>
