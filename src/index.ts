@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { startScheduler } from "./services/scheduler";
 import express from "express";
 import { config } from "./config";
@@ -8,6 +9,7 @@ import {
   getAccount,
   fetchInboxMessages,
   sendEmail,
+  fetchMessageById,
 } from "./services/nylas";
 
 import { summarizeEmails } from "./services/openai";
@@ -23,7 +25,15 @@ import { saveGrant } from "./repositories/userRepository";
 
 const app = express();
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf;
+    },
+  })
+);
+
+app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (_req, res) => {
   const user = db
@@ -136,6 +146,94 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
+  });
+});
+
+function verifyNylasSignature(req: any) {
+  const signature = req.headers["x-nylas-signature"];
+
+  if (!signature || !config.nylasWebhookSecret) {
+    return false;
+  }
+
+  const digest = crypto
+    .createHmac("sha256", config.nylasWebhookSecret)
+    .update(req.rawBody)
+    .digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(digest),
+    Buffer.from(String(signature))
+  );
+}
+
+app.get("/webhooks/nylas", (req, res) => {
+  const challenge = req.query.challenge;
+
+  if (!challenge) {
+    return res.status(400).send("Missing challenge");
+  }
+
+  res.status(200).send(String(challenge));
+});
+
+app.post("/webhooks/nylas", (req, res) => {
+  if (!verifyNylasSignature(req)) {
+    return res.status(401).send("Invalid signature");
+  }
+
+  res.status(200).send("ok");
+
+  setImmediate(async () => {
+    try {
+      const payload = req.body;
+
+      const eventType = payload.type || payload.data?.type || "";
+      const object = payload.data?.object || payload.object || payload.data || {};
+
+      if (
+        !eventType.includes("message.created") &&
+        !eventType.includes("message.created.truncated")
+      ) {
+        return;
+      }
+
+      const messageId = object.id || object.message_id;
+      const grantId = object.grant_id || payload.data?.grant_id;
+
+      if (!messageId || !grantId) {
+        console.log("Webhook missing messageId or grantId");
+        return;
+      }
+
+      let message = object;
+
+      const shouldRefetch =
+        eventType.includes("truncated") ||
+        !message.subject ||
+        !message.from ||
+        !message.snippet;
+
+      if (shouldRefetch) {
+        message = await fetchMessageById(grantId, messageId);
+      }
+
+      saveMessage({
+        message_id: message.id,
+        grant_id: grantId,
+        sender: message.from?.[0]?.email || "",
+        subject: message.subject || "",
+        snippet: message.snippet || "",
+        received_at: message.date
+          ? new Date(message.date * 1000).toISOString()
+          : new Date().toISOString(),
+        is_read: message.unread === false,
+      });
+
+      console.log(`Webhook saved message ${messageId}`);
+    } catch (error) {
+      console.error("Webhook processing error:", error);
+    }
   });
 });
 
@@ -541,6 +639,60 @@ app.get("/send-summary/:grantId", async (req, res) => {
     console.error(error);
     res.status(500).send("Send summary failed");
   }
+});
+
+app.get("/settings/:grantId", (req, res) => {
+  const grantId = req.params.grantId;
+
+  const user = db
+    .prepare("SELECT * FROM users WHERE grant_id = ?")
+    .get(grantId) as any;
+
+  if (!user) {
+    return res.status(404).send("User not found");
+  }
+
+  res.send(`
+    <html>
+      <body style="font-family:Arial;padding:40px">
+        <h1>Summary Settings</h1>
+
+        <form method="POST" action="/settings/${grantId}">
+          <label>Destination Email</label><br>
+          <input name="destinationEmail" value="${user.destination_email || ""}" style="padding:8px;width:300px" />
+          <br><br>
+
+          <label>Cadence</label><br>
+          <select name="cadence" style="padding:8px;width:300px">
+            <option value="hourly" ${user.cadence === "hourly" ? "selected" : ""}>Hourly</option>
+            <option value="every_6_hours" ${user.cadence === "every_6_hours" ? "selected" : ""}>Every 6 hours</option>
+            <option value="daily" ${user.cadence === "daily" ? "selected" : ""}>Daily</option>
+          </select>
+
+          <br><br>
+          <button type="submit">Save Settings</button>
+        </form>
+      </body>
+    </html>
+  `);
+});
+
+app.post("/settings/:grantId", (req, res) => {
+  const grantId = req.params.grantId;
+  const { destinationEmail, cadence } = req.body;
+
+  if (!["hourly", "every_6_hours", "daily"].includes(cadence)) {
+    return res.status(400).send("Invalid cadence");
+  }
+
+  db.prepare(`
+    UPDATE users
+    SET destination_email = ?,
+        cadence = ?
+    WHERE grant_id = ?
+  `).run(destinationEmail, cadence, grantId);
+
+  res.redirect("/");
 });
 
 app.get("/me", async (_req, res) => {

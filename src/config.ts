@@ -10,6 +10,7 @@ export const config = {
   nylasClientId: process.env.NYLAS_CLIENT_ID ?? "",
   nylasClientSecret: process.env.NYLAS_CLIENT_SECRET ?? "",
   nylasCallbackUri: process.env.NYLAS_CALLBACK_URI ?? "",
+  nylasWebhookSecret: process.env.NYLAS_WEBHOOK_SECRET ?? "",
 
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
 };

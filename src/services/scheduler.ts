@@ -20,9 +20,18 @@ export function startScheduler() {
 
         const now = new Date();
 
-        const shouldRun =
-          user.cadence === "hourly" &&
-          now.getTime() - lastRun.getTime() >= 60 * 60 * 1000;
+        let intervalMs = 60 * 60 * 1000;
+
+if (user.cadence === "every_6_hours") {
+  intervalMs = 6 * 60 * 60 * 1000;
+}
+
+if (user.cadence === "daily") {
+  intervalMs = 24 * 60 * 60 * 1000;
+}
+
+const shouldRun =
+  now.getTime() - lastRun.getTime() >= intervalMs;
 
         if (!shouldRun) continue;
 

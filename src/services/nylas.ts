@@ -69,3 +69,16 @@ export async function sendEmail(grantId: string, to: string, subject: string, bo
 
   return response.data;
 }
+
+export async function fetchMessageById(grantId: string, messageId: string) {
+  const response = await axios.get(
+    `https://api.us.nylas.com/v3/grants/${grantId}/messages/${messageId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${config.nylasApiKey}`,
+      },
+    }
+  );
+
+  return response.data.data;
+}
